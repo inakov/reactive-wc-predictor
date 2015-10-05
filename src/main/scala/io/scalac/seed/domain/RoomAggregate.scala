@@ -4,6 +4,7 @@ import akka.actor.{Cancellable, Props}
 import akka.persistence.SnapshotMetadata
 import io.scalac.seed.domain.AggregateRoot._
 import io.scalac.seed.domain.RoomAggregate.RoomStatusType.RoomStatusType
+import io.scalac.seed.service.RoomAggregateManager.ExpireRoomStatus
 import org.joda.time.{Period, DateTime}
 
 /**
@@ -36,7 +37,6 @@ object RoomAggregate {
   case class RoomStatusChanged(statusType: RoomStatusType,
                                lastStatusUpdate: Option[DateTime],
                                statusExpiration: Option[DateTime]) extends Event
-  case class RoomStatusExpired(roomId: String) extends Event
   case object RoomRemoved extends Event
 
   def props(id: String): Props = Props(new RoomAggregate(id))
@@ -45,7 +45,6 @@ object RoomAggregate {
 class RoomAggregate(id: String) extends AggregateRoot {
 
   import RoomAggregate._
-  import scala.concurrent.duration._
 
   override def persistenceId = id
 
@@ -62,6 +61,7 @@ class RoomAggregate(id: String) extends AggregateRoot {
       state = Room(id, floorId, name, statusType, None, None)
     case RoomStatusChanged(status, lastUpdate, expiration) => state match {
       case s: Room =>
+        statusExpirationSchedule.map(c => c.cancel())
         statusExpirationSchedule = scheduleStatusExpiration(expiration, status)
         state = s.copy(statusType = status, lastStatusUpdate = lastUpdate, statusExpiration = expiration)
       case _ => //nothing
@@ -74,8 +74,10 @@ class RoomAggregate(id: String) extends AggregateRoot {
   def scheduleStatusExpiration(statusExpiration: Option[DateTime],
                                currentStatus: RoomStatusType): Option[Cancellable] = statusExpiration match {
     case Some(expirationTime) if expirationTime.isAfterNow =>
-      val delay: Long = expirationTime.getMillis - DateTime.now.getMillis
-      Some(context.system.scheduler.scheduleOnce(delay millis, context.parent, "test"))
+      import scala.concurrent.duration._
+      import context.dispatcher
+      val delay = (expirationTime.getMillis - DateTime.now.getMillis).millis
+      Some(context.system.scheduler.scheduleOnce(delay, context.parent, ExpireRoomStatus(id, currentStatus)))
     case _ => None
   }
 

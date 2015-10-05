@@ -7,7 +7,7 @@ import io.scalac.seed.domain.AggregateRoot.{Remove, GetState}
 import io.scalac.seed.domain.RoomAggregate
 import io.scalac.seed.domain.RoomAggregate.{ChangeRoomStatus, Initialize}
 import io.scalac.seed.domain.RoomAggregate.RoomStatusType.RoomStatusType
-import io.scalac.seed.service.RoomAggregateManager.{DeleteRoom, GetRoom, UpdateRoomStatus, RegisterRoom}
+import io.scalac.seed.service.RoomAggregateManager._
 import org.joda.time._
 
 /**
@@ -20,7 +20,8 @@ object RoomAggregateManager {
   case class RegisterRoom(floorId: String, name: String) extends Command
   case class DeleteRoom(id: String) extends Command
   case class GetRoom(id: String) extends Command
-  case class UpdateRoomStatus(roomId: String, status: RoomStatusType)
+  case class UpdateRoomStatus(roomId: String, status: RoomStatusType) extends Command
+  case class ExpireRoomStatus(roomId: String, currentStatus: RoomStatusType) extends Command
 
   def props = Props(new RoomAggregateManager)
 }
@@ -37,12 +38,14 @@ class RoomAggregateManager extends AggregateManager{
       val id = UUID.randomUUID().toString()
       processAggregateCommand(id, Initialize(floorId, name))
     case UpdateRoomStatus(id, status) =>
-      val expiration = DateTime.now.plusMinutes(15)
+      val expiration = DateTime.now.plusMinutes(1)
       processAggregateCommand(id, ChangeRoomStatus(status, Option(expiration)))
     case GetRoom(id) =>
       processAggregateCommand(id, GetState)
     case DeleteRoom(id) =>
       processAggregateCommand(id, Remove)
+    case ExpireRoomStatus(id, currentStatus) =>
+      log.debug("ExpireRoomStatus with currentStatus: " + currentStatus)
   }
 
   /**
