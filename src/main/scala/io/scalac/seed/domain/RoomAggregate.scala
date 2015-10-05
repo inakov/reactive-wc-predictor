@@ -61,14 +61,23 @@ class RoomAggregate(id: String) extends AggregateRoot {
       state = Room(id, floorId, name, statusType, None, None)
     case RoomStatusChanged(status, lastUpdate, expiration) => state match {
       case s: Room =>
-        statusExpirationSchedule.map(c => c.cancel())
+        cancelStatusExpiration
         statusExpirationSchedule = scheduleStatusExpiration(expiration, status)
         state = s.copy(statusType = status, lastStatusUpdate = lastUpdate, statusExpiration = expiration)
       case _ => //nothing
     }
     case RoomRemoved =>
       context.become(removed)
+      cancelStatusExpiration
       state = Removed
+  }
+
+  def cancelStatusExpiration: Unit = statusExpirationSchedule match {
+    case Some(schedule) if !schedule.isCancelled =>
+      schedule.cancel
+      statusExpirationSchedule = None
+    case _ =>
+      statusExpirationSchedule = None
   }
 
   def scheduleStatusExpiration(statusExpiration: Option[DateTime],
