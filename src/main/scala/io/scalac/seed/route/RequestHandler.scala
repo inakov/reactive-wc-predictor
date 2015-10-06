@@ -1,14 +1,16 @@
 package io.scalac.seed.route
 
+import org.json4s.JsonAST.JString
+
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 
 import akka.actor._
 import io.scalac.seed.common.Error
-import io.scalac.seed.domain.AggregateRoot
+import io.scalac.seed.domain.{RoomStatus, AggregateRoot}
 import io.scalac.seed.domain.AggregateRoot.{Removed, Uninitialized}
 import io.scalac.seed.service.AggregateManager
-import org.json4s.DefaultFormats
+import org.json4s.{CustomSerializer, DefaultFormats}
 import spray.http.StatusCode
 import spray.http.StatusCodes._
 import spray.httpx.Json4sSupport
@@ -67,7 +69,7 @@ trait RequestHandler extends Actor with ActorLogging with Json4sSupport {
 
   import context._
 
-  val json4sFormats = DefaultFormats
+  val json4sFormats = DefaultFormats ++ CustomSerializers.all
 
   def r: RequestContext
   def target: ActorRef

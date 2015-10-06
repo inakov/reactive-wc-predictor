@@ -3,12 +3,12 @@ package io.scalac.seed
 import akka.actor._
 import io.scalac.seed.route._
 import io.scalac.seed.service._
-import org.json4s.DefaultFormats
+import org.json4s.{DefaultFormats}
 import spray.http.MediaTypes._
 
-class ServiceActor extends Actor with ActorLogging with VehicleRoute with UserRoute {
+class ServiceActor extends Actor with ActorLogging with VehicleRoute with UserRoute with RoomRoute{
 
-  val json4sFormats = DefaultFormats
+  val json4sFormats = DefaultFormats ++ CustomSerializers.all
 
   implicit def actorRefFactory = context
 
@@ -16,13 +16,15 @@ class ServiceActor extends Actor with ActorLogging with VehicleRoute with UserRo
   
   val vehicleAggregateManager = context.actorOf(VehicleAggregateManager.props)
 
+  val roomAggregateManager = context.actorOf(RoomAggregateManager.props)
+
   val userAggregateManager = context.actorOf(UserAggregateManager.props)
 
   def receive =
     runRoute(
       pathPrefix("api") {
         respondWithMediaType(`application/json`) {
-          vehicleRoute ~ userRoute
+          vehicleRoute ~ userRoute ~ roomRoute
         }
       }
     )

@@ -3,9 +3,9 @@ package io.scalac.seed.domain
 import akka.actor.{Cancellable, Props}
 import akka.persistence.SnapshotMetadata
 import io.scalac.seed.domain.AggregateRoot._
-import io.scalac.seed.domain.RoomAggregate.RoomStatusType.RoomStatusType
+import io.scalac.seed.domain.RoomStatus.USABLE
 import io.scalac.seed.service.RoomAggregateManager.ExpireRoomStatus
-import org.joda.time.{Period, DateTime}
+import org.joda.time.DateTime
 
 /**
  * Created by inakov on 15-10-5.
@@ -14,27 +14,18 @@ object RoomAggregate {
 
   import AggregateRoot._
 
-  object RoomStatusType extends Enumeration {
-    type RoomStatusType = Value
-
-    val  USABLE = Value(1, "USABLE")
-    val DANGER = Value(2, "DANGER")
-    val BAD = Value(3, "BAD")
-    val OCCUPIED = Value(4, "OCCUPIED")
-  }
-
   case class Room(id: String,
                   floorId: String,
                   name: String,
-                  statusType: RoomStatusType,
+                  status: RoomStatus,
                   lastStatusUpdate: Option[DateTime],
                   statusExpiration: Option[DateTime]) extends State
 
   case class Initialize(floorId: String, name: String) extends Command
-  case class ChangeRoomStatus(statusType: RoomStatusType, statusExpiration: Option[DateTime]) extends Command
+  case class ChangeRoomStatus(status: RoomStatus) extends Command
 
-  case class RoomInitialized(floorId: String, name: String, statusType: RoomStatusType) extends Event
-  case class RoomStatusChanged(statusType: RoomStatusType,
+  case class RoomInitialized(floorId: String, name: String, statusType: RoomStatus) extends Event
+  case class RoomStatusChanged(status: RoomStatus,
                                lastStatusUpdate: Option[DateTime],
                                statusExpiration: Option[DateTime]) extends Event
   case object RoomRemoved extends Event
@@ -59,11 +50,11 @@ class RoomAggregate(id: String) extends AggregateRoot {
     case RoomInitialized(floorId, name, statusType) =>
       context.become(created)
       state = Room(id, floorId, name, statusType, None, None)
-    case RoomStatusChanged(status, lastUpdate, expiration) => state match {
+    case RoomStatusChanged(statusType, lastUpdate, expiration) => state match {
       case s: Room =>
         cancelStatusExpiration
-        statusExpirationSchedule = scheduleStatusExpiration(expiration, status)
-        state = s.copy(statusType = status, lastStatusUpdate = lastUpdate, statusExpiration = expiration)
+        statusExpirationSchedule = scheduleStatusExpiration(expiration, statusType)
+        state = s.copy(status = statusType, lastStatusUpdate = lastUpdate, statusExpiration = expiration)
       case _ => //nothing
     }
     case RoomRemoved =>
@@ -81,7 +72,7 @@ class RoomAggregate(id: String) extends AggregateRoot {
   }
 
   def scheduleStatusExpiration(statusExpiration: Option[DateTime],
-                               currentStatus: RoomStatusType): Option[Cancellable] = statusExpiration match {
+                               currentStatus: RoomStatus): Option[Cancellable] = statusExpiration match {
     case Some(expirationTime) if expirationTime.isAfterNow =>
       import scala.concurrent.duration._
       import context.dispatcher
@@ -94,7 +85,7 @@ class RoomAggregate(id: String) extends AggregateRoot {
 
   val initial: Receive = {
     case Initialize(floorId, name) =>
-      persist(RoomInitialized(floorId, name, RoomStatusType.USABLE))(afterEventPersisted)
+      persist(RoomInitialized(floorId, name, USABLE))(afterEventPersisted)
     case GetState =>
       respond()
     case KillAggregate =>
@@ -102,13 +93,23 @@ class RoomAggregate(id: String) extends AggregateRoot {
   }
 
   val created: Receive = {
-    case ChangeRoomStatus(status, expiration) =>
-      persist(RoomStatusChanged(status, Some(DateTime.now), expiration))(afterEventPersisted)
+    case ChangeRoomStatus(status) =>
+      val lastStatusUpdate = Some(DateTime.now)
+      val statusExpiration = calculateStatusExpiration(status, lastStatusUpdate)
+      persist(RoomStatusChanged(status, lastStatusUpdate, statusExpiration))(afterEventPersisted)
     case GetState =>
       respond()
+    case Remove =>
+      persist(RoomRemoved)(afterEventPersisted)
     case KillAggregate =>
       context.stop(self)
   }
+
+  private def calculateStatusExpiration(status: RoomStatus, lastStatusUpdate: Option[DateTime]) =
+    status.defaultExpiration match {
+      case Some(delay) => Some(lastStatusUpdate.getOrElse(DateTime.now).plus(delay))
+      case _=> None
+    }
 
   val removed: Receive = {
     case GetState =>
@@ -117,5 +118,12 @@ class RoomAggregate(id: String) extends AggregateRoot {
       context.stop(self)
   }
 
-  override protected def restoreFromSnapshot(metadata: SnapshotMetadata, state: State): Unit = ???
+  override protected def restoreFromSnapshot(metadata: SnapshotMetadata, state: State): Unit = {
+    this.state = state
+    state match {
+      case Uninitialized => context become initial
+      case Removed => context become removed
+      case _: Room => context become created
+    }
+  }
 }
